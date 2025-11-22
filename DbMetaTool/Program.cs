@@ -108,7 +108,7 @@ namespace DbMetaTool
             };
             FbConnection.CreateDatabase(csb.ToString());
 
-            var scripts = Directory.GetFiles(scriptsDirectory, "*.sql").OrderBy(f => f);//Wczytaj pliki *.sql z katalogu scriptsDirectory, posortowane alfabetycznie
+            var scripts = Directory.GetFiles(scriptsDirectory, "*.sql"); //Wczytaj pliki *.sql z katalogu scriptsDirectory
             
             using var conn = new FbConnection(csb.ToString());
 
