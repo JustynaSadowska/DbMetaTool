@@ -55,7 +55,7 @@ namespace DbMetaTool
                             string scriptsDir = GetArgValue(args, "--scripts-dir");
 
                             UpdateDatabase(connStr, scriptsDir);
-                            Console.WriteLine("Baza danych została zaktualizowana pomyślnie.");
+                            Console.WriteLine("\nBaza danych została zaktualizowana pomyślnie.");
                             return 0;
                         }
 
@@ -316,39 +316,94 @@ namespace DbMetaTool
                 throw new DirectoryNotFoundException($"Katalog skryptów nie istnieje: {scriptsDirectory}");
 
             var scriptFiles = Directory.GetFiles(scriptsDirectory, "*.sql");
-            Array.Sort(scriptFiles); // kolejnośc alfabetyczna
 
-            using var conn = new FbConnection(connectionString);
-            conn.Open();
+            var groups = new Dictionary<string, List<string>>
+            {
+                ["DOMAIN"] = [],
+                ["TABLE"] = [],
+                ["PROCEDURE"] = [],
+            };
+
+            var allowedScripts = new Dictionary<string, string>
+            {
+                ["CREATE DOMAIN"] = "DOMAIN",
+                ["CREATE TABLE"] = "TABLE",
+                ["ALTER TABLE"] = "TABLE",
+                ["CREATE OR ALTER TABLE"] = "TABLE",
+                ["CREATE PROCEDURE"] = "PROCEDURE",
+                ["ALTER PROCEDURE"] = "PROCEDURE",
+                ["CREATE OR ALTER PROCEDURE"] = "PROCEDURE"
+            };
 
             foreach (var file in scriptFiles)
             {
-                string script = File.ReadAllText(file);
+                string script = File.ReadAllText(file).ToUpperInvariant();
 
-                string upperScript = script.ToUpperInvariant();
-                if (!upperScript.Contains("CREATE DOMAIN") &&
-                    !upperScript.Contains("CREATE TABLE") &&
-                    !upperScript.Contains("CREATE PROCEDURE") &&
-                    !upperScript.Contains("ALTER PROCEDURE"))
+                string? matchedGroup = null;
+
+                foreach (var prefix in allowedScripts.Keys)
                 {
-                    Console.WriteLine($"  Pomijanie nieobsługiwanego skryptu: {Path.GetFileName(file)}");
-                    continue; // pomijamy skrypt
+                    if (script.StartsWith(prefix))
+                    {
+                        matchedGroup = allowedScripts[prefix];
+                        break;
+                    }
                 }
-                Console.WriteLine($"Wykonywanie skryptu: {Path.GetFileName(file)}");
 
-                using var cmd = new FbCommand(script, conn);
+                if (matchedGroup != null)
+                    groups[matchedGroup].Add(file);
+                else
+                    Console.WriteLine($"Pomijanie nieobsługiwanego skryptu: {Path.GetFileName(file)}");
+            }
+
+            using var conn = new FbConnection(connectionString);
+            
+            conn.Open();
+
+            using var transaction = conn.BeginTransaction();
+
+            try
+            {
+                ExecuteGroup(conn, transaction, groups["DOMAIN"], "DOMAIN");
+                ExecuteGroup(conn, transaction, groups["TABLE"], "TABLE");
+                ExecuteGroup(conn, transaction, groups["PROCEDURE"], "PROCEDURE");
+
+                transaction.Commit();
+                Console.WriteLine("Aktualizacja bazy danych zakończona pomyślnie (COMMIT)");
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                Console.WriteLine($"\nWystąpił błąd – wszystkie zmiany zostały cofnięte (ROLLBACK)\n");
+                throw new Exception(ex.Message);
+            }
+        }
+
+        private static void ExecuteGroup(FbConnection conn, FbTransaction transaction, List<string> files, string groupName)
+        {
+            if (files.Count == 0) return;
+
+            Console.WriteLine($"\n=== Wykonywanie grupy: {groupName} ===");
+
+            foreach (var file in files.OrderBy(f => f))
+            {
+                string script = File.ReadAllText(file);
+                string fileName = Path.GetFileName(file);
+
+                Console.WriteLine($"Wykonywanie skryptu: {fileName}");
+
+                using var cmd = new FbCommand(script, conn, transaction);
+
                 try
                 {
                     cmd.ExecuteNonQuery();
-                    Console.WriteLine($"  Skrypt {Path.GetFileName(file)} wykonany poprawnie.");
+                    Console.WriteLine($"Skrypt {fileName} wykonany poprawnie.");
                 }
                 catch (FbException ex)
                 {
-                    Console.WriteLine($"  Błąd przy wykonywaniu skryptu: {Path.GetFileName(file)} -> {ex.Message}");
+                    throw new Exception($"Błąd w skrypcie {fileName}: {ex.Message}");
                 }
             }
-
-            Console.WriteLine("Aktualizacja bazy danych zakończona.");
         }
     }
 }
