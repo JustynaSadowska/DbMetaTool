@@ -95,8 +95,8 @@ namespace DbMetaTool
 
             var dbFile = Path.Combine(databaseDirectory, "database.fdb");
 
-            if (File.Exists(dbFile)) 
-                File.Delete(dbFile);
+            if (File.Exists(dbFile))
+                throw new InvalidOperationException($"Plik bazy danych '{dbFile}' już istnieje. Operacja przerwana.");
 
             var csb = new FbConnectionStringBuilder
             {
